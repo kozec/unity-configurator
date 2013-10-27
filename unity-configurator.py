@@ -350,6 +350,7 @@ def populate_resolution_combo(app):
 	xr_data = Popen([XRANDR], stdout=PIPE).communicate()[0].split("\n")
 	try:
 		out = [ x for x in xr_data if "primary" in x ]
+		if len(out) == 0: out = [ x for x in xr_data if "connected" in x ]
 		primary = out[0].split(" ")[0]
 		print "Found primary display:", primary
 	except Exception, e:
