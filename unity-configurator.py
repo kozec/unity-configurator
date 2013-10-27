@@ -18,7 +18,10 @@ You should have received a copy of the GNU Lesser General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+########### <HELP SCREEEN> #########
 HELP = """
+
+
 Usage:
   %(exe)s [-h|--help]
   %(exe)s [-f] config_location
@@ -31,7 +34,16 @@ user to configure their graphics settings
   -h, --help       displays this help screen
   -f               creates default pref file, if it doesn't already
                    exists in config_location
-""".strip("\n")
+
+
+""".strip("\n") 
+########## </HELP SCREEEN> ########
+
+
+
+
+
+
 
 APP_NAME = "Universal Unity (engine) Configurator"
 APP_NAME_SHORT = "UUC"
