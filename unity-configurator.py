@@ -55,7 +55,7 @@ def display_error(message):
 	"""
 	Displays error message using most common tools for doing so in
 	user-friendly way and falls back to old-fashioned console if there
-	is no too available.
+	is no tool available.
 	"""
 	is_exec = lambda x : os.path.isfile(x) and os.access(x, os.X_OK)
 	if is_exec("/usr/bin/yad") :
