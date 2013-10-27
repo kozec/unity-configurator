@@ -95,6 +95,7 @@ class App(gtk.Window):
 		self.lb_pick_game  = BoldLabel(_("Pick a game from list:"))
 		self.lb_resolution = BoldLabel(_("Screen resolution"))
 		self.lb_custom_res = BoldLabel(_("Custom resolution"))
+		self.lb_custom_w   = BoldLabel("<span color='red'>%s</span>" % _("Warning: Using custom fullscreen resolution may make \n your screen unusable or even crash your desktop."))
 		self.lb_game_info  = BoldLabel(_("Game info"))
 		self.lb_x = gtk.Label("x")
 		
@@ -140,6 +141,7 @@ class App(gtk.Window):
 		tab.attach(self.resolution_w,	1, 2, 6, 7,  yoptions=0, xpadding=30)
 		tab.attach(self.lb_x,			2, 3, 6, 7,  xoptions=0, yoptions=0, xpadding=2)
 		tab.attach(self.resolution_h,	4, 5, 6, 7,  yoptions=0, xpadding=30)
+		tab.attach(self.lb_custom_w,	1, 5, 7, 8,  yoptions=0, xpadding=30)
 		tab.attach(self.lb_game_info,	1, 5, 8, 9,  yoptions=0, xpadding=10)
 		tab.attach(self.game_info,		1, 5, 9, 10,  xoptions=gtk.EXPAND|gtk.FILL, yoptions=0, xpadding=30)
 		tab.attach(self.link,			1, 5, 10, 11,  xoptions=gtk.EXPAND|gtk.FILL, yoptions=0, xpadding=30)
@@ -149,6 +151,7 @@ class App(gtk.Window):
 		vb.set_border_width(5)
 		self.add(vb)
 		self.show_all()
+		self.lb_custom_w.set_visible(False)
 		self.set_settings_enabled(False)
 		self.set_custom_res_enabled(False)
 	
@@ -175,7 +178,11 @@ class App(gtk.Window):
 		lv.append_column(col)
 		lv.set_headers_visible(False)
 		lv.set_search_column(1)
-
+	
+	def is_custom_res(self):
+		""" Returns True if resolution is set to custom """
+		return self.resolution.get_active_text() == _("custom")
+	
 	def set_resolutions(self, rlist):
 		""" Called from another thread when list of available resolutions is determined """
 		gtk.threads_enter()
@@ -271,7 +278,7 @@ class App(gtk.Window):
 		# Add new values
 		root.append(build_element("pref", "1" if self.fullscreen.get_active() else "0", name="Screenmanager Is Fullscreen mode", type="int"))
 		res = self.resolution.get_active_text()
-		if res == _("custom"):
+		if self.is_custom_res():
 			root.append(build_element("pref", self.resolution_w.get_text(), name="Screenmanager Resolution Width", type="int"))
 			root.append(build_element("pref", self.resolution_h.get_text(), name="Screenmanager Resolution Height", type="int"))
 		else:
@@ -292,7 +299,7 @@ class App(gtk.Window):
 	
 	def on_resolution_changed(self, cb):
 		""" Called when value in resolution combobox gets changed """
-		if cb.get_active_text() == _("custom"):
+		if self.is_custom_res():
 			self.set_custom_res_enabled(True)
 			if self.resolution_h.get_text().strip() == "" or self.resolution_w.get_text().strip() == "":
 				self.resolution_h.set_text(cb.get_model()[0][0].split("x")[0])
@@ -300,10 +307,12 @@ class App(gtk.Window):
 		else:
 			self.set_custom_res_enabled(False)
 		self.but_save.set_sensitive(True)
+		self.lb_custom_w.set_visible( self.is_custom_res() and self.fullscreen.get_active() )
 	
 	def on_fullscreen_changed(self, *a):
 		""" Called fullscreen combobox is toggled """
 		self.but_save.set_sensitive(True)
+		self.lb_custom_w.set_visible( self.is_custom_res() and self.fullscreen.get_active() )
 	
 	def on_custom_res_changed(self, ibox):
 		""" Called when value in either custom resolution inputbox gets changed """
