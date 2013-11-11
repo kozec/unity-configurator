@@ -90,6 +90,11 @@ except ImportError:
 	sys.exit(1)
 _ = lambda x : x
 
+IGNORED = [
+	"BattleWorldsKronos",	# Has ingame configuration and ignores settings in prefs
+	# more to come...
+]
+
 class App(gtk.Window):
 	""" Main window / application interface """
 	def __init__(self):
@@ -472,6 +477,8 @@ def search_for_configs(app):
 		try:
 			company = x.split(os.path.sep)[-3]
 			game = x.split(os.path.sep)[-2]
+			if game in IGNORED:
+				continue
 		except Exception:
 			continue
 		app.add_game(x, game, company)
