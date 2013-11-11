@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Unity3D Configuration
+Comment=Universal Unity3D Configurator
+Exec=/usr/bin/python2 /usr/lib/unity3d-configurator/unity-configurator.py
+Icon=/usr/share/icons/unity3d-configurator.png
+StartupNotify=true
+Terminal=false
+Type=Application
+Categories=Setings;Games;
+

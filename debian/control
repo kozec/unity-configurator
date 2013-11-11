@@ -1,0 +1,21 @@
+Source: unity3d-configurator
+Section: unknown
+Priority: extra
+Maintainer: kozec <kozec@kozec.com>
+Build-Depends: debhelper (>= 9), python
+Standards-Version: 3.9.4
+Homepage: https://github.com/kozec/unity-configurator
+Vcs-Git: https://github.com/kozec/unity-configurator.git
+Vcs-Browser: https://github.com/kozec/unity-configurator-
+X-Python-Version: >= 2.6
+
+Section: games
+Package: unity3d-configurator
+Architecture: any
+Depends: python,
+	 python-gtk2,
+	 x11-xserver-utils
+Description: Universal configurator for unity based games
+ Searches for configuration files of unity-based applications
+ and lets user to configure their graphics settings
+
