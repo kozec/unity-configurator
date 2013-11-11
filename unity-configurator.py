@@ -45,7 +45,7 @@ user to configure their graphics settings
 
 
 
-APP_NAME = "Universal Unity (engine) Configurator"
+APP_NAME = "Universal Unity3D Configurator"
 APP_NAME_SHORT = "UUC"
 
 import os, sys, thread
@@ -145,7 +145,7 @@ class App(gtk.Window):
 		sw.set_size_request(300, 200)
 		sw.set_policy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
 		tab.attach(sw, 0, 1, 1, 12)
-		tab.attach(self.lb_pick_game,	0, 1, 0, 1,  yoptions=gtk.FILL, xpadding=5)
+		tab.attach(self.lb_pick_game,	0, 1, 0, 1,  yoptions=gtk.FILL, xpadding=5, ypadding=3)
 		tab.attach(self.lb_resolution,	1, 3, 1, 2,  xoptions=gtk.EXPAND|gtk.FILL, yoptions=0, xpadding=10)
 		tab.attach(self.resolution,		1, 5, 2, 3,  yoptions=0, xpadding=30)
 		tab.attach(self.fullscreen,		1, 5, 4, 5,  yoptions=0, xpadding=30)
@@ -213,6 +213,21 @@ class App(gtk.Window):
 		""" Called from another thread for every game found """
 		gtk.threads_enter()
 		self.lv.get_model().append((config, name, company))
+		gtk.threads_leave()
+	
+	def on_search_finished(self):
+		"""
+		Called from another thread after search for games is finished.
+		Shows warning message if there is no game found.
+		"""
+		gtk.threads_enter()
+		if len(self.lv.get_model()) == 0:
+			md = gtk.MessageDialog(self, 
+				gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_WARNING, 
+				gtk.BUTTONS_OK, _("No Unity3D based games found.\nIf you already have one installed, please, run it before launching this tool to generate default configuration file."))
+			md.set_title(_("Warning"))
+			md.run()
+			md.destroy()
 		gtk.threads_leave()
 	
 	def load_config(self, filename):
@@ -405,6 +420,7 @@ def search_for_configs(app):
 		except Exception:
 			continue
 		app.add_game(x, game, company)
+	app.on_search_finished()
 
 if __name__ == "__main__":
 	# Parse arguments
