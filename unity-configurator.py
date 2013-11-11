@@ -48,7 +48,8 @@ user to configure their graphics settings
 APP_NAME = "Universal Unity3D Configurator"
 APP_NAME_SHORT = "UUC"
 
-import os, sys, thread
+import os, sys, thread, traceback
+from abc import ABCMeta, abstractmethod
 from threading import Thread
 from subprocess import Popen, PIPE
 from xml.etree import ElementTree
@@ -95,7 +96,7 @@ class App(gtk.Window):
 		gtk.Window.__init__(self)
 		self.set_title(_(APP_NAME))
 		self.set_position(gtk.WIN_POS_CENTER)
-		self.config_data = None
+		self.config = None
 		# Containers
 		vb = gtk.VBox()
 		sw = gtk.ScrolledWindow()
@@ -232,9 +233,12 @@ class App(gtk.Window):
 	
 	def load_config(self, filename):
 		""" Loads game configuration from specified file """
+		self.config = None
 		try:
-			tree = ElementTree.parse(filename)
+			self.config = DefaultSettings(filename)
 		except Exception, e:
+			# ... on error ...
+			print >>sys.stderr, traceback.format_exc()
 			self.set_settings_enabled(False)
 			self.set_custom_res_enabled(False)
 			md = gtk.MessageDialog(self, 
@@ -243,25 +247,15 @@ class App(gtk.Window):
 			md.run()
 			md.destroy()
 			return
-		self.config_data = (filename, tree)
-		res_w = 0
-		res_h = 0
-		for child in tree.getroot():
-			try:
-				if child.tag == "pref" and "name" in child.attrib:
-					if child.attrib["name"] == "Screenmanager Is Fullscreen mode":
-						self.fullscreen.set_active(child.text.strip(" \t\r\n") != "0")
-					elif child.attrib["name"] == "Screenmanager Resolution Height":
-						res_h = int(child.text.strip(" \t\r\n"))
-					elif child.attrib["name"] == "Screenmanager Resolution Width":
-						res_w = int(child.text.strip(" \t\r\n"))
-			except Exception:
-				continue
+		# Transfer configuration from wrapper to GUI
+		self.fullscreen.set_active(self.config.is_fullscreen())
+		res_w, res_h = self.config.get_resolution()
 		if res_w == 0 or res_h == 0:
 			# Resolution is not set, fallback to screen resolution
 			self.resolution.set_active(0)
 			self.set_custom_res_enabled(False)
 		else:
+			# Select apropriate value in combobox or enable 'custom' checkbox
 			model = self.resolution.get_model()
 			res = "%sx%s" % (res_w, res_h)
 			index = 0
@@ -280,49 +274,6 @@ class App(gtk.Window):
 				self.resolution_h.set_text(str(res_h))
 		self.but_save.set_sensitive(False)
 		self.set_settings_enabled(True)
-	
-	def save_config(self, filename, tree):
-		""" Saves game configuration. Tree parameter should contain previously parsed XML data """
-		def build_element(tag, text, **rest):
-			""" Used only to save some lines """
-			e = ElementTree.Element(tag, **rest)
-			e.text = text
-			e.tail = "\n\t"
-			return e
-		filename, tree = self.config_data
-		root = tree.getroot()
-		# Remove values to be overwritten
-		removing = True
-		while removing:
-			removing = False
-			for child in root:
-				if child.tag == "pref" and "name" in child.attrib:
-					if child.attrib["name"] in ("Screenmanager Is Fullscreen mode",
-							"Screenmanager Resolution Height", "Screenmanager Resolution Width"):
-						root.remove(child)
-						removing = True
-						break
-		# Add new values
-		root.append(build_element("pref", "1" if self.fullscreen.get_active() else "0", name="Screenmanager Is Fullscreen mode", type="int"))
-		res = self.resolution.get_active_text()
-		if self.is_custom_res():
-			root.append(build_element("pref", self.resolution_w.get_text(), name="Screenmanager Resolution Width", type="int"))
-			root.append(build_element("pref", self.resolution_h.get_text(), name="Screenmanager Resolution Height", type="int"))
-		else:
-			root.append(build_element("pref", res.split("x")[0], name="Screenmanager Resolution Width", type="int"))
-			root.append(build_element("pref", res.split("x")[1], name="Screenmanager Resolution Height", type="int"))
-		# Write XML file
-		try:
-			tree.write(filename)
-		except Exception, e:
-			self.set_settings_enabled(False)
-			self.set_custom_res_enabled(False)
-			md = gtk.MessageDialog(self, 
-				gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR, 
-				gtk.BUTTONS_CLOSE, _("Failed to write game configuration") + "\n" + str(e))
-			md.run()
-			md.destroy()
-		self.but_save.set_sensitive(False)
 	
 	def on_resolution_changed(self, cb):
 		""" Called when value in resolution combobox gets changed """
@@ -348,8 +299,28 @@ class App(gtk.Window):
 	
 	def on_save(self, *a):
 		""" Called when user clicks on Save button """
-		if self.config_data:
-			self.save_config(*self.config_data)
+		if self.config:
+			# Transfer data from UI to configuration wrapper
+			self.config.set_fullscreen(self.fullscreen.get_active())
+			if self.is_custom_res():
+				self.config.set_resolution(int(self.resolution_w.get_text()), int(self.resolution_h.get_text()))
+			else:
+				res = self.resolution.get_active_text()
+				self.config.set_resolution(int(res.split("x")[0]), int(res.split("x")[1]))
+			# Store configuration on disk
+			try:
+				self.config.save(self.is_custom_res())
+			except Exception, e:
+				# ... on error ...
+				print >>sys.stderr, traceback.format_exc()
+				self.set_settings_enabled(False)
+				self.set_custom_res_enabled(False)
+				md = gtk.MessageDialog(self, 
+					gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR, 
+					gtk.BUTTONS_CLOSE, _("Failed to write game configuration") + "\n" + str(e))
+				md.run()
+				md.destroy()
+			self.but_save.set_sensitive(False)
 	
 	def on_game_selected(self, lv):
 		""" Called when user clicks in game list """
@@ -369,7 +340,91 @@ class App(gtk.Window):
 		if config_dir.startswith(os.path.expanduser("~")):
 			config_dir = "~" + config_dir[len(os.path.expanduser("~")):]
 		self.link.set_label(config_dir)
+
+class Settings:
+	""" Abstract class for all settings wrappers """
+	__metaclass__ = ABCMeta
 	
+	@abstractmethod
+	def is_fullscreen(self):
+		""" Returns True, if game is currently set to fullscreen """
+		pass
+		
+	@abstractmethod
+	def set_fullscreen(self, value):
+		""" Enables / disables fullscreen mode """
+		pass
+	
+	@abstractmethod
+	def get_resolution(self):
+		"""
+		Returns current window size resolution setting.
+		Returns tuple in (w, h) format.
+		"""
+		pass
+	
+	@abstractmethod
+	def set_resolution(self, w, h):
+		""" Sets resolution """
+		pass
+	
+	@abstractmethod
+	def save(self, custom_res):
+		""" Stores changed settings """
+		pass
+
+class DefaultSettings(Settings):
+	""" Wrapper for default unity configuration file format """
+	def __init__(self, filename):
+		self.filename = filename
+		self.tree = ElementTree.parse(filename)
+		self.fullscreen = False
+		self.w = self.h = 0
+		for child in self.tree.getroot():
+			try:
+				if child.tag == "pref" and "name" in child.attrib:
+					if child.attrib["name"] == "Screenmanager Is Fullscreen mode":
+						self.fullscreen = (child.text.strip(" \t\r\n") != "0")
+					elif child.attrib["name"] == "Screenmanager Resolution Height":
+						self.h = int(child.text.strip(" \t\r\n"))
+					elif child.attrib["name"] == "Screenmanager Resolution Width":
+						self.w = int(child.text.strip(" \t\r\n"))
+			except Exception:
+				continue
+	
+	def is_fullscreen(self):			return self.fullscreen
+	def set_fullscreen(self, value):	self.fullscreen = value
+	def get_resolution(self):			return (self.w, self.h)
+	def set_resolution(self, w, h):		(self.w, self.h) = (w, h)
+
+	def save(self, custom_res):
+		def build_element(tag, text, **rest):
+			""" Used only to save some lines """
+			e = ElementTree.Element(tag, **rest)
+			e.text = text
+			e.tail = "\n\t"
+			return e
+		root = self.tree.getroot()
+		# Remove values to be overwritten
+		removing = True
+		while removing:
+			removing = False
+			for child in root:
+				if child.tag == "pref" and "name" in child.attrib:
+					if child.attrib["name"] in ("Screenmanager Is Fullscreen mode",
+							"Screenmanager Resolution Height", "Screenmanager Resolution Width"):
+						root.remove(child)
+						removing = True
+						break
+		# Add new values
+		root.append(build_element("pref", "1" if self.fullscreen else "0", name="Screenmanager Is Fullscreen mode", type="int"))
+		root.append(build_element("pref", str(self.w), name="Screenmanager Resolution Width", type="int"))
+		root.append(build_element("pref", str(self.h), name="Screenmanager Resolution Height", type="int"))
+		# Write XML file
+		self.tree.write(self.filename)
+
+Settings.register(DefaultSettings)
+
 class BoldLabel(gtk.Label):
 	""" Left-aligned label with bold text """
 	def __init__(self, text):
