@@ -508,29 +508,37 @@ class scsCopyInGameState(DefaultSettings):
 
 class scsResolutionAsNumber(DefaultSettings):
 	""" Special case settings format: Resolution saved as number, choosen from pre-defined list """
-	def __init__(self, filename, resAsNumNode, *resolutions):
+	DEFAULT_RESOLUTIONS = ["640x480", "800x480", "854x480", "960x540", "1024x576",
+					"800x600", "1024x600", "960x640", "1024x640", "1152x720", "1280x720", "1024x768", "1152x768",
+					"1280x768", "1366x768", "1280x800", "1152x864", "1280x864", "1440x900", "1600x900", "1280x960",
+					"1440x960", "1280x1024", "1400x1050", "1680x1050", "1920x1080"]
+	
+	def __init__(self, filename, resAsNumNode, resolutions):
 		DefaultSettings.__init__(self, filename)
 		self.resAsNumNode = resAsNumNode
 		self.resolutions = resolutions
-		for child in [ x for x in self.tree.iter("pref") if "name" in x.attrib and x.attrib["name"] == resAsNumNode ] :
-			try:
-				num = int(child.text)
-				self.w = int(resolutions[num].split("x")[0])
-				self.h = int(resolutions[num].split("x")[1])
-			except Exception:
-				continue
+		if resAsNumNode != None:
+			for child in [ x for x in self.tree.iter("pref") if "name" in x.attrib and x.attrib["name"] == resAsNumNode ] :
+				try:
+					num = int(child.text)
+					self.w = int(resolutions[num].split("x")[0])
+					self.h = int(resolutions[num].split("x")[1])
+				except Exception:
+					continue
 	
 	def get_supported_resolutions(self, app):
 		return self.resolutions
 	
 	def save(self, custom_res):
-		num = self.resolutions.index("%sx%s" % (self.w, self.h))
-		self.set_setting(self.resAsNumNode, "int", str(num))
+		if self.resAsNumNode != None:
+			num = self.resolutions.index("%sx%s" % (self.w, self.h))
+			self.set_setting(self.resAsNumNode, "int", str(num))
 		DefaultSettings.save(self, custom_res)
 
 IGNORED = [
 	"BattleWorldsKronos",	# Has ingame configuration and ignores settings in prefs
 	"DoE",					# Fullscreen can be toggled ingame and ignores settings -_-
+	"SirYouAreBeingHunted",	# Has ingame configuration and ignores settings in prefs
 	# more to come...
 ]
 
@@ -538,10 +546,7 @@ SPECIAL_CASES = {
 	# Format:
 	# 'Game' :		(Class, additonal, parameters, for, constructor...)
 	'Micron' :		(scsCopyInGameState, "GameState"),
-	'Fancy Skulls':	(scsResolutionAsNumber, "resolutionNumber", "640x480", "800x480", "854x480", "960x540", "1024x576",
-					"800x600", "1024x600", "960x640", "1024x640", "1152x720", "1280x720", "1024x768", "1152x768",
-					"1280x768", "1366x768", "1280x800", "1152x864", "1280x864", "1440x900", "1600x900", "1280x960",
-					"1440x960", "1280x1024", "1400x1050", "1680x1050", "1920x1080")
+	'Fancy Skulls':	(scsResolutionAsNumber, "resolutionNumber", scsResolutionAsNumber.DEFAULT_RESOLUTIONS),
 	}
 
 class BoldLabel(gtk.Label):
@@ -609,14 +614,18 @@ if __name__ == "__main__":
 				# Fail miserably otherwise
 				print >>sys.stderr, "Specified path is not unity configuration file nor configuration directory"
 				sys.exit(-1)
-
+		
+		# Little preparation
+		company = config.split(os.path.sep)[-3]
+		game = config.split(os.path.sep)[-2]
+		if game in IGNORED:
+			print >>sys.stderr, _("Sorry, this game is using it's own configuration format and this is known as not working with this tool.")
+			sys.exit(1)
+		print "Loading configuration file", config
 		# Prepare UI and GTK
 		gtk.threads_init()
 		a = App()
 		# Load configuration
-		print "Loading configuration file", config
-		company = config.split(os.path.sep)[-3]
-		game = config.split(os.path.sep)[-2]
 		a.load_config(config, game)
 		a.set_game_info(config, game, company)
 		# Setup and show window
