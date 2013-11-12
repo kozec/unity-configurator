@@ -90,17 +90,13 @@ except ImportError:
 	sys.exit(1)
 _ = lambda x : x
 
-IGNORED = [
-	"BattleWorldsKronos",	# Has ingame configuration and ignores settings in prefs
-	# more to come...
-]
-
 class App(gtk.Window):
 	""" Main window / application interface """
 	def __init__(self):
 		gtk.Window.__init__(self)
 		self.set_title(_(APP_NAME))
 		self.set_position(gtk.WIN_POS_CENTER)
+		self.xranrd_resolutions = self.get_xrandr_resolutions()
 		self.config = None
 		# Containers
 		vb = gtk.VBox()
@@ -201,25 +197,42 @@ class App(gtk.Window):
 		""" Returns True if resolution is set to custom """
 		return self.resolution.get_active_text() == _("custom")
 	
-	def set_resolutions(self, rlist):
-		""" Called from another thread when list of available resolutions is determined """
-		gtk.threads_enter()
-		if len(rlist) == 0:
-			self.resolution.append_text("%sx%s" % (gtk.gdk.screen_width(), gtk.gdk.screen_height()))
-		else:
-			for x in rlist:
-				self.resolution.append_text(x)
-		self.resolution.append_text(_("custom"))
-		self.resolution.set_active(0)
-		self.set_settings_enabled(False)
-		self.but_save.set_sensitive(False)
-		gtk.threads_leave()
-	
 	def add_game(self, config, name, company):
 		""" Called from another thread for every game found """
 		gtk.threads_enter()
 		self.lv.get_model().append((config, name, company))
 		gtk.threads_leave()
+	
+	def get_xrandr_resolutions(self):
+		""" Uses xrandr utility to loads list of resolutions available for primary display """
+		if not os.path.exists(XRANDR):
+			print >>sys.stderr, "Warning: xrandr utility not found. Only current desktop resolution will be available"
+			return ["%sx%s" % (gtk.gdk.screen_width(), gtk.gdk.screen_height()), _("custom")]
+		xr_data = Popen([XRANDR], stdout=PIPE).communicate()[0].split("\n")
+		try:
+			out = [ x for x in xr_data if "primary" in x ]
+			if len(out) == 0: out = [ x for x in xr_data if "connected" in x ]
+			primary = out[0].split(" ")[0]
+			print "Found primary display:", primary
+		except Exception, e:
+			print >>sys.stderr, "Warning: Failed to determine primary display. Only current desktop resolution will be available"
+			return ["%sx%s" % (gtk.gdk.screen_width(), gtk.gdk.screen_height()), _("custom")]
+		appends = False
+		r_list = []
+		for x in xr_data:
+			if appends:
+				if not x.startswith("  "):
+					break
+				try:
+					res = x.strip().split(" ")[0]
+				except Exception:
+					continue
+				print "Found resolution:", res
+				r_list.append(res)
+			if x.startswith(primary):
+				appends = True
+		r_list.append(_("custom"))
+		return r_list
 	
 	def on_search_finished(self):
 		"""
@@ -236,11 +249,14 @@ class App(gtk.Window):
 			md.destroy()
 		gtk.threads_leave()
 	
-	def load_config(self, filename):
+	def load_config(self, filename, game):
 		""" Loads game configuration from specified file """
 		self.config = None
 		try:
-			self.config = DefaultSettings(filename)
+			if game in SPECIAL_CASES:
+				self.config = SPECIAL_CASES[game][0](filename, *SPECIAL_CASES[game][1:])
+			else:
+				self.config = DefaultSettings(filename)
 		except Exception, e:
 			# ... on error ...
 			print >>sys.stderr, traceback.format_exc()
@@ -252,6 +268,11 @@ class App(gtk.Window):
 			md.run()
 			md.destroy()
 			return
+		# Populate resolution combobox
+		self.resolution.get_model().clear()
+		for x in self.config.get_supported_resolutions(self):
+			self.resolution.append_text(x)
+		
 		# Transfer configuration from wrapper to GUI
 		self.fullscreen.set_active(self.config.is_fullscreen())
 		res_w, res_h = self.config.get_resolution()
@@ -334,7 +355,7 @@ class App(gtk.Window):
 			config, game, company = model[it]
 		except Exception:
 			return
-		self.load_config(config)
+		self.load_config(config, game)
 		self.set_game_info(config, game, company)
 	
 	def set_game_info(self, config, game, company):
@@ -354,7 +375,11 @@ class Settings:
 	def is_fullscreen(self):
 		""" Returns True, if game is currently set to fullscreen """
 		pass
-		
+	
+	@abstractmethod
+	def get_supported_resolutions(self, app):
+		pass
+	
 	@abstractmethod
 	def set_fullscreen(self, value):
 		""" Enables / disables fullscreen mode """
@@ -382,53 +407,142 @@ class DefaultSettings(Settings):
 	""" Wrapper for default unity configuration file format """
 	def __init__(self, filename):
 		self.filename = filename
-		self.tree = ElementTree.parse(filename)
+		if self.filename != None:
+			self.from_string(file(filename, "r").read())
+		else:
+			# Empty unity prefs
+			self.tree = ElementTree.fromstring('<unity_prefs version_major="1" version_minor="0"></unity_prefs>')
+			self.fullscreen = False
+			self.w, self.h = (800, 600)
+		
+	def from_string(self, string):
+		""" Reads configuration from string """
+		self.tree = ElementTree.fromstring(string)
 		self.fullscreen = False
-		self.w = self.h = 0
-		for child in self.tree.getroot():
+		self.w, self.h = (800, 600)
+		for child in [ x for x in self.tree.iter("pref") if "name" in x.attrib ] :
 			try:
-				if child.tag == "pref" and "name" in child.attrib:
-					if child.attrib["name"] == "Screenmanager Is Fullscreen mode":
-						self.fullscreen = (child.text.strip(" \t\r\n") != "0")
-					elif child.attrib["name"] == "Screenmanager Resolution Height":
-						self.h = int(child.text.strip(" \t\r\n"))
-					elif child.attrib["name"] == "Screenmanager Resolution Width":
-						self.w = int(child.text.strip(" \t\r\n"))
+				if child.attrib["name"] == "Screenmanager Is Fullscreen mode":
+					self.fullscreen = (child.text.strip(" \t\r\n") != "0")
+				elif child.attrib["name"] == "Screenmanager Resolution Height":
+					self.h = int(child.text.strip(" \t\r\n"))
+				elif child.attrib["name"] == "Screenmanager Resolution Width":
+					self.w = int(child.text.strip(" \t\r\n"))
 			except Exception:
 				continue
 	
-	def is_fullscreen(self):			return self.fullscreen
-	def set_fullscreen(self, value):	self.fullscreen = value
-	def get_resolution(self):			return (self.w, self.h)
-	def set_resolution(self, w, h):		(self.w, self.h) = (w, h)
-
-	def save(self, custom_res):
-		def build_element(tag, text, **rest):
-			""" Used only to save some lines """
-			e = ElementTree.Element(tag, **rest)
-			e.text = text
-			e.tail = "\n\t"
+	def get_supported_resolutions(self, app):	return app.xranrd_resolutions
+	def is_fullscreen(self):					return self.fullscreen
+	def set_fullscreen(self, value):			self.fullscreen = value
+	def get_resolution(self):					return (self.w, self.h)
+	def set_resolution(self, w, h):				(self.w, self.h) = (w, h)
+	
+	def set_setting(self, name, etype, value):
+		# If specified node is already in tree, just overwrite value
+		for e in [ x for x in self.tree.iter("pref") if "name" in x.attrib and x.attrib["name"] == name ] :
+			e.text = value
+			e.attrib["type"] = etype
 			return e
-		root = self.tree.getroot()
-		# Remove values to be overwritten
-		removing = True
-		while removing:
-			removing = False
-			for child in root:
-				if child.tag == "pref" and "name" in child.attrib:
-					if child.attrib["name"] in ("Screenmanager Is Fullscreen mode",
-							"Screenmanager Resolution Height", "Screenmanager Resolution Width"):
-						root.remove(child)
-						removing = True
-						break
-		# Add new values
-		root.append(build_element("pref", "1" if self.fullscreen else "0", name="Screenmanager Is Fullscreen mode", type="int"))
-		root.append(build_element("pref", str(self.w), name="Screenmanager Resolution Width", type="int"))
-		root.append(build_element("pref", str(self.h), name="Screenmanager Resolution Height", type="int"))
-		# Write XML file
-		self.tree.write(self.filename)
+		# Add new node otherwise
+		e = ElementTree.SubElement(self.tree, "pref", name=name)
+		e.text = value
+		e.attrib["type"] = etype
+		e.tail = "\n\t"
+		return e
+	
+	def to_string(self):
+		# Replace values
+		self.set_setting("Screenmanager Is Fullscreen mode",	"int",	"1" if self.fullscreen else "0")
+		self.set_setting("Screenmanager Resolution Width",		"int",	str(self.w))
+		self.set_setting("Screenmanager Resolution Height",		"int",	str(self.h))
+		# Generate string
+		return ElementTree.tostring(self.tree)
+	
+	def save(self, custom_res):
+		if self.filename != None:
+			file(self.filename, "w").write(self.to_string())
 
 Settings.register(DefaultSettings)
+
+class scsCopyInGameState(DefaultSettings):
+	""" Special case settings format: Settings are copied in embeded XML """
+	def __init__(self, filename, embededXmlNode):
+		# Load setting as usual
+		DefaultSettings.__init__(self, filename)
+		# Grab XML file embeded as CDATA node
+		self.embededXmlNode = embededXmlNode
+		embeds = [ x for x in self.tree.iter('pref') if "name" in x.attrib and x.attrib["name"] == embededXmlNode ]
+		self.embeded = ElementTree.Element(embededXmlNode)
+		if len(embeds) > 0:
+			# Load data from embeded XML
+			string = embeds[0].text
+			if 'encoding="utf-16"' in string:
+				# Fix for ParseError: encoding specified in XML declaration is incorrect: line 1, column 30
+				string = string.replace('encoding="utf-16"', 'encoding="utf-8"')
+			try:
+				self.embeded = ElementTree.fromstring(string)
+				self.fullscreen = self.embeded.iter("FullScreen").next().text.lower().strip() != "false"
+				self.w = int(self.embeded.iter("ScreenWidth").next().text)
+				self.h = int(self.embeded.iter("ScreenHeight").next().text)
+			except Exception: pass
+	
+	def set_in_embeded(self, name, value):
+		# If specified node is already in tree, just overwrite value
+		for e in self.embeded.iter(name):
+			e.text = value
+			return e
+		# Add new node otherwise
+		e = ElementTree.SubElement(self.embeded, name)
+		e.text = value
+		e.tail = "\n"
+		return e
+	
+	def save(self, custom_res):
+		# Update settings in embeded file
+		self.set_in_embeded("FullScreen",	"true" if self.fullscreen else "false")
+		self.set_in_embeded("ScreenWidth",	str(self.w))
+		self.set_in_embeded("ScreenHeight",	str(self.h))
+		self.set_setting(self.embededXmlNode, "string", ElementTree.tostring(self.embeded))
+		# Call save on superclass
+		DefaultSettings.save(self, custom_res)
+
+class scsResolutionAsNumber(DefaultSettings):
+	""" Special case settings format: Resolution saved as number, choosen from pre-defined list """
+	def __init__(self, filename, resAsNumNode, *resolutions):
+		DefaultSettings.__init__(self, filename)
+		self.resAsNumNode = resAsNumNode
+		self.resolutions = resolutions
+		for child in [ x for x in self.tree.iter("pref") if "name" in x.attrib and x.attrib["name"] == resAsNumNode ] :
+			try:
+				num = int(child.text)
+				self.w = int(resolutions[num].split("x")[0])
+				self.h = int(resolutions[num].split("x")[1])
+			except Exception:
+				continue
+	
+	def get_supported_resolutions(self, app):
+		return self.resolutions
+	
+	def save(self, custom_res):
+		num = self.resolutions.index("%sx%s" % (self.w, self.h))
+		self.set_setting(self.resAsNumNode, "int", str(num))
+		DefaultSettings.save(self, custom_res)
+
+IGNORED = [
+	"BattleWorldsKronos",	# Has ingame configuration and ignores settings in prefs
+	"DoE",					# Fullscreen can be toggled ingame and ignores settings -_-
+	# more to come...
+]
+
+SPECIAL_CASES = {
+	# Format:
+	# 'Game' :		(Class, additonal, parameters, for, constructor...)
+	'Micron' :		(scsCopyInGameState, "GameState"),
+	'Fancy Skulls':	(scsResolutionAsNumber, "resolutionNumber", "640x480", "800x480", "854x480", "960x540", "1024x576",
+					"800x600", "1024x600", "960x640", "1024x640", "1152x720", "1280x720", "1024x768", "1152x768",
+					"1280x768", "1366x768", "1280x800", "1152x864", "1280x864", "1440x900", "1600x900", "1280x960",
+					"1440x960", "1280x1024", "1400x1050", "1680x1050", "1920x1080")
+	}
 
 class BoldLabel(gtk.Label):
 	""" Left-aligned label with bold text """
@@ -436,38 +550,6 @@ class BoldLabel(gtk.Label):
 		gtk.Label.__init__(self)
 		self.set_markup("<b>%s</b>" % text)
 		self.set_alignment(0, 0)
-
-def populate_resolution_combo(app):
-	""" Uses xrandr utility to loads list of resolutions available for primary display """
-	if not os.path.exists(XRANDR):
-		print >>sys.stderr, "Warning: xrandr utility not found. Only current desktop resolution will be available"
-		app.set_resolutions([])
-		return
-	xr_data = Popen([XRANDR], stdout=PIPE).communicate()[0].split("\n")
-	try:
-		out = [ x for x in xr_data if "primary" in x ]
-		if len(out) == 0: out = [ x for x in xr_data if "connected" in x ]
-		primary = out[0].split(" ")[0]
-		print "Found primary display:", primary
-	except Exception, e:
-		print >>sys.stderr, "Warning: Failed to determine primary display. Only current desktop resolution will be available"
-		app.set_resolutions([])
-		return
-	appends = False
-	r_list = []
-	for x in xr_data:
-		if appends:
-			if not x.startswith("  "):
-				break
-			try:
-				res = x.strip().split(" ")[0]
-			except Exception:
-				continue
-			print "Found resolution:", res
-			r_list.append(res)
-		if x.startswith(primary):
-			appends = True
-	app.set_resolutions(r_list)
 
 def search_for_configs(app):
 	""" Searchs for config files in known locations """
@@ -491,7 +573,6 @@ if __name__ == "__main__":
 		gtk.threads_init()
 		a = App()
 		a.show()
-		thread.start_new_thread(populate_resolution_combo, (a,))
 		thread.start_new_thread(search_for_configs, (a,))
 		gtk.main()
 	elif sys.argv[1] in ("-h", "--help"):
@@ -532,15 +613,11 @@ if __name__ == "__main__":
 		# Prepare UI and GTK
 		gtk.threads_init()
 		a = App()
-		# Get list of available resolutions
-		t = Thread(target=populate_resolution_combo, args=(a,))
-		t.start()
-		t.join()
 		# Load configuration
 		print "Loading configuration file", config
 		company = config.split(os.path.sep)[-3]
 		game = config.split(os.path.sep)[-2]
-		a.load_config(config)
+		a.load_config(config, game)
 		a.set_game_info(config, game, company)
 		# Setup and show window
 		a.set_game_list_enabled(False)
