@@ -559,7 +559,7 @@ class BoldLabel(gtk.Label):
 def search_for_configs(app):
 	""" Searchs for config files in known locations """
 	configs = Popen(["find", os.path.expanduser("~/.config/unity3d"), "-iname", "prefs"], stdout=PIPE).communicate()[0].split("\n")
-	configs.sort(key=lambda c : c.split(os.path.sep)[-2] if len(c.split(os.path.sep)) > 2 else "" )
+	configs.sort(key=lambda c : c.split(os.path.sep)[-2].lower() if len(c.split(os.path.sep)) > 2 else "" )
 	for x in configs:
 		try:
 			company = x.split(os.path.sep)[-3]
