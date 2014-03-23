@@ -1,7 +1,7 @@
 #!/usr/bin/env python2
 
 """
-Universal Unity (engine) Configurator
+Universal Unity3D Configurator
 Copyright (C) 2013 Kozec
 
 This program is free software: you can redistribute it and/or modify
@@ -430,6 +430,7 @@ class DefaultSettings(Settings):
 					self.w = int(child.text.strip(" \t\r\n"))
 			except Exception:
 				continue
+		return self.tree
 	
 	def get_supported_resolutions(self, app):	return app.xranrd_resolutions
 	def is_fullscreen(self):					return self.fullscreen
@@ -535,6 +536,30 @@ class scsResolutionAsNumber(DefaultSettings):
 			self.set_setting(self.resAsNumNode, "int", str(num))
 		DefaultSettings.save(self, custom_res)
 
+class scsFullScreenKeyDoubled(DefaultSettings):
+	"""
+	Special case settings format: Fullscreen settings is stored in
+	additional key
+	"""
+	def __init__(self, filename, additionalFSKey):
+		self.additionalFSKey = additionalFSKey
+		DefaultSettings.__init__(self, filename)
+
+	def from_string(self, string):
+		""" Reads configuration from string """
+		self.tree = DefaultSettings.from_string(self, string)
+		for child in [ x for x in self.tree.iter("pref") if "name" in x.attrib ] :
+			try:
+				if child.attrib["name"] == self.additionalFSKey:
+					self.fullscreen = (child.text.strip(" \t\r\n") != "0")
+			except Exception:
+				continue
+		return self.tree
+	
+	def to_string(self):
+		self.set_setting(self.additionalFSKey,	"int",	"1" if self.fullscreen else "0")
+		return DefaultSettings.to_string(self)
+
 IGNORED = [
 	"BattleWorldsKronos",	# Has ingame configuration and ignores settings in prefs
 	"DoE",					# Fullscreen can be toggled ingame and ignores settings -_-
@@ -544,9 +569,10 @@ IGNORED = [
 
 SPECIAL_CASES = {
 	# Format:
-	# 'Game' :		(Class, additonal, parameters, for, constructor...)
-	'Micron' :		(scsCopyInGameState, "GameState"),
-	'Fancy Skulls':	(scsResolutionAsNumber, "resolutionNumber", scsResolutionAsNumber.DEFAULT_RESOLUTIONS),
+	# 'Game' :			(Class, additonal constructor parameters...)
+	'Micron' :			(scsCopyInGameState, "GameState"),
+	'Fancy Skulls':		(scsResolutionAsNumber, "resolutionNumber", scsResolutionAsNumber.DEFAULT_RESOLUTIONS),
+	'Breach & Clear':	(scsFullScreenKeyDoubled, "Fullscreen"),
 	}
 
 class BoldLabel(gtk.Label):
